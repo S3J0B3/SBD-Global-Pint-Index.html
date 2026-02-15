@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🍺 Pint Index — Global Beer Price Map</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --bg2: #161922;
+    --bg3: #1e2330;
+    --amber: #e8a020;
+    --amber-light: #f5c842;
+    --foam: #fef9ec;
+    --text: #e8e0d0;
+    --text-dim: #8a8070;
+    --border: rgba(232,160,32,0.15);
+    --c1: #1a5c0f;
+    --c2: #3a8c20;
+    --c3: #78b830;
+    --c4: #d4b800;
+    --c5: #d06010;
+    --c6: #b82020;
+    --c0: #252b3b;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, rgba(232,160,32,0.05) 0%, transparent 100%);
+  }
+  .logo { display: flex; align-items: baseline; gap: 12px; }
+  .logo h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 26px; font-weight: 900;
+    color: var(--amber-light);
+    letter-spacing: -0.02em;
+  }
+  .logo .sub {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px; color: var(--text-dim);
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .header-note {
+    font-size: 11px; color: var(--text-dim);
+    font-family: 'DM Mono', monospace;
+    text-align: right; line-height: 1.8;
+  }
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* MAP */
+  #map-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #0a1018;
+  }
+  #map-wrap svg {
+    width: 100%; height: 100%;
+    cursor: grab;
+    display: block;
+  }
+  #map-wrap svg:active { cursor: grabbing; }
+
+  .sphere    { fill: #0a1320; }
+  .graticule { fill: none; stroke: rgba(255,255,255,0.04); stroke-width: 0.4; }
+  .borders   { fill: none; stroke: #0a1018; stroke-width: 0.5; pointer-events: none; }
+
+  .country {
+    transition: filter 0.1s;
+    cursor: pointer;
+  }
+  .country:hover  { filter: brightness(1.4); }
+  .country.active { filter: brightness(1.5); stroke: var(--amber-light); stroke-width: 1px; }
+
+  .map-controls {
+    position: absolute; bottom: 20px; left: 20px;
+    display: flex; flex-direction: column; gap: 4px; z-index: 10;
+  }
+  .map-btn {
+    width: 30px; height: 30px;
+    background: var(--bg2); border: 1px solid var(--border);
+    color: var(--amber); border-radius: 5px; font-size: 15px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .map-btn:hover { background: var(--bg3); border-color: var(--amber); }
+
+  /* SIDEBAR */
+  #sidebar {
+    width: 300px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--bg2);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  #info-card {
+    padding: 22px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 255px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .hint { text-align: center; color: var(--text-dim); }
+  .hint .big { font-size: 44px; display: block; margin-bottom: 8px; }
+  .hint p { font-size: 12px; font-family: 'DM Mono', monospace; line-height: 1.7; }
+
+  #detail { display: none; animation: fadeUp 0.2s ease; }
+  #detail.show { display: block; }
+  @keyframes fadeUp {
+    from { opacity:0; transform: translateY(6px); }
+    to   { opacity:1; transform: translateY(0); }
+  }
+  .d-flag { font-size: 36px; display: block; margin-bottom: 6px; }
+  .d-name { font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 700; color: var(--foam); line-height: 1.2; margin-bottom: 3px; }
+  .d-cap  { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+  .stat   { background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 12px 14px; margin-bottom: 8px; }
+  .stat-lbl { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 5px; }
+  .stat-val { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 700; color: var(--amber-light); line-height: 1; }
+  .stat-val small { font-size: 13px; color: var(--text-dim); font-family: 'DM Mono', monospace; font-weight: 400; }
+  .stat-note { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+  .beer-name { font-size: 15px; font-weight: 500; color: var(--foam); margin-top: 3px; }
+  .pbar-wrap { margin-top: 7px; height: 3px; background: rgba(255,255,255,0.07); border-radius: 2px; overflow: hidden; }
+  .pbar { height: 100%; border-radius: 2px; background: linear-gradient(90deg, #d4b800, var(--amber-light)); transition: width 0.45s cubic-bezier(0.16,1,0.3,1); }
+
+  #legend { padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .leg-title { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 9px; }
+  .leg-items { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .leg-item  { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+  .leg-sw    { width: 11px; height: 11px; border-radius: 2px; flex-shrink: 0; }
+
+  #search-wrap { padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  #search {
+    width: 100%; background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 12px;
+    padding: 8px 12px; border-radius: 5px; outline: none; transition: border-color 0.2s;
+  }
+  #search::placeholder { color: var(--text-dim); }
+  #search:focus { border-color: var(--amber); }
+
+  #list { flex: 1; overflow-y: auto; padding: 0 20px 20px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  #list::-webkit-scrollbar { width: 3px; }
+  #list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .list-hdr { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); padding: 12px 0 8px; position: sticky; top: 0; background: var(--bg2); }
+  .li { display: flex; align-items: center; gap: 8px; padding: 7px 6px; border-radius: 5px; cursor: pointer; transition: background 0.12s; border-bottom: 1px solid rgba(255,255,255,0.025); }
+  .li:hover  { background: var(--bg3); }
+  .li.active { background: rgba(232,160,32,0.09); }
+  .li-rank    { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-dim); width: 16px; text-align: right; flex-shrink: 0; }
+  .li-flag    { font-size: 16px; flex-shrink: 0; }
+  .li-info    { flex: 1; min-width: 0; }
+  .li-country { font-size: 11px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .li-beer    { font-size: 10px; color: var(--text-dim); font-family: 'DM Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .li-price   { font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; flex-shrink: 0; }
+
+  #tt { position: fixed; pointer-events: none; background: var(--bg); border: 1px solid var(--amber); border-radius: 7px; padding: 9px 13px; font-size: 12px; z-index: 999; opacity: 0; transition: opacity 0.12s; box-shadow: 0 6px 24px rgba(0,0,0,0.6); max-width: 210px; }
+  #tt.on { opacity: 1; }
+  .tt-n { font-weight: 600; color: var(--foam); margin-bottom: 2px; }
+  .tt-p { font-family: 'DM Mono', monospace; color: var(--amber-light); }
+  .tt-b { color: var(--text-dim); font-size: 10px; margin-top: 2px; }
+
+  @media (max-width: 700px) {
+    .layout { flex-direction: column; }
+    #sidebar { width: 100%; height: 42vh; border-left: none; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <h1>🍺 Pint Index</h1>
+    <span class="sub">Global Beer Price Map</span>
+  </div>
+  <div class="header-note">
+    Avg. price of a draught pint in a bar · USD · 2024
+  </div>
+</header>
+
+<div class="layout">
+  <div id="map-wrap">
+    <svg id="map"></svg>
+    <div class="map-controls">
+      <button class="map-btn" id="zi">+</button>
+      <button class="map-btn" id="zo">−</button>
+      <button class="map-btn" id="zr">⌂</button>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div id="info-card">
+      <div class="hint" id="hint">
+        <span class="big">🍺</span>
+        <p>Click any country<br>to see beer prices</p>
+      </div>
+      <div id="detail">
+        <span class="d-flag" id="d-flag"></span>
+        <div class="d-name" id="d-name"></div>
+        <div class="d-cap"  id="d-cap"></div>
+        <div class="stat">
+          <div class="stat-lbl">Avg. Pint Price (bar / pub)</div>
+          <div class="stat-val" id="d-price"></div>
+          <div class="pbar-wrap"><div class="pbar" id="d-bar"></div></div>
+          <div class="stat-note" id="d-note"></div>
+        </div>
+        <div class="stat">
+          <div class="stat-lbl">Most Consumed Beer</div>
+          <div class="beer-name" id="d-beer"></div>
+          <div class="stat-note" id="d-type"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="legend">
+      <div class="leg-title">Price per pint · USD</div>
+      <div class="leg-items">
+        <div class="leg-item"><div class="leg-sw" style="background:var(--c1)"></div>Under $2</div>
+        <div class="leg-item"><div class="leg-sw" style="background:var(--c2)"></div>$2 – $4</div>
+        <div class="leg-item"><div class="leg-sw" style="background:var(--c3)"></div>$4 – $6</div>
+        <div class="leg-item"><div class="leg-sw" style="background:var(--c4)"></div>$6 – $8</div>
+        <div class="leg-item"><div class="leg-sw" style="background:var(--c5)"></div>$8 – $10</div>
+        <div class="leg-item"><div class="leg-sw" style="background:var(--c6)"></div>Over $10</div>
+      </div>
+    </div>
+
+    <div id="search-wrap">
+      <input id="search" type="text" placeholder="Search country or beer…" autocomplete="off">
+    </div>
+
+    <div id="list">
+      <div class="list-hdr">All countries · sorted by price ↓</div>
+      <div id="list-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="tt">
+  <div class="tt-n" id="tt-n"></div>
+  <div class="tt-p" id="tt-p"></div>
+  <div class="tt-b" id="tt-b"></div>
+</div>
+
+<script>
+// ── DATA (keyed by numeric ISO-3166 matching world-atlas) ─────────────────────
+const DATA = {
+  "004":{ name:"Afghanistan",          flag:"🇦🇫", capital:"Kabul",                price:1.2,  beer:"Afghan Beer",             type:"Lager" },
+  "008":{ name:"Albania",              flag:"🇦🇱", capital:"Tirana",               price:1.8,  beer:"Korça",                   type:"Lager" },
+  "012":{ name:"Algeria",              flag:"🇩🇿", capital:"Algiers",              price:1.5,  beer:"Tango",                   type:"Lager" },
+  "024":{ name:"Angola",               flag:"🇦🇴", capital:"Luanda",               price:2.8,  beer:"Cuca",                    type:"Lager" },
+  "032":{ name:"Argentina",            flag:"🇦🇷", capital:"Buenos Aires",         price:2.5,  beer:"Quilmes",                 type:"Lager" },
+  "036":{ name:"Australia",            flag:"🇦🇺", capital:"Canberra",             price:10.5, beer:"Victoria Bitter",         type:"Bitter" },
+  "040":{ name:"Austria",              flag:"🇦🇹", capital:"Vienna",               price:5.2,  beer:"Ottakringer",             type:"Lager" },
+  "031":{ name:"Azerbaijan",           flag:"🇦🇿", capital:"Baku",                 price:2.2,  beer:"Xırdalan",                type:"Lager" },
+  "050":{ name:"Bangladesh",           flag:"🇧🇩", capital:"Dhaka",                price:1.2,  beer:"Pabst Blue Ribbon",       type:"Lager" },
+  "112":{ name:"Belarus",              flag:"🇧🇾", capital:"Minsk",                price:1.4,  beer:"Lidskae",                 type:"Lager" },
+  "056":{ name:"Belgium",              flag:"🇧🇪", capital:"Brussels",             price:4.5,  beer:"Jupiler",                 type:"Lager" },
+  "084":{ name:"Belize",               flag:"🇧🇿", capital:"Belmopan",             price:2.5,  beer:"Belikin",                 type:"Lager" },
+  "204":{ name:"Benin",                flag:"🇧🇯", capital:"Porto-Novo",           price:1.2,  beer:"La Béninoise",            type:"Lager" },
+  "064":{ name:"Bhutan",               flag:"🇧🇹", capital:"Thimphu",              price:1.8,  beer:"Druk 11000",              type:"Lager" },
+  "068":{ name:"Bolivia",              flag:"🇧🇴", capital:"Sucre",                price:1.6,  beer:"Pacena",                  type:"Lager" },
+  "070":{ name:"Bosnia & Herzegovina", flag:"🇧🇦", capital:"Sarajevo",             price:2.2,  beer:"Sarajevsko",              type:"Lager" },
+  "072":{ name:"Botswana",             flag:"🇧🇼", capital:"Gaborone",             price:2.0,  beer:"Castle Lager",            type:"Lager" },
+  "076":{ name:"Brazil",               flag:"🇧🇷", capital:"Brasília",             price:2.8,  beer:"Skol",                    type:"Lager" },
+  "096":{ name:"Brunei",               flag:"🇧🇳", capital:"Bandar Seri Begawan",  price:8.0,  beer:"Tiger",                   type:"Lager" },
+  "100":{ name:"Bulgaria",             flag:"🇧🇬", capital:"Sofia",                price:1.8,  beer:"Kamenitza",               type:"Lager" },
+  "854":{ name:"Burkina Faso",         flag:"🇧🇫", capital:"Ouagadougou",          price:1.0,  beer:"Brakina",                 type:"Lager" },
+  "108":{ name:"Burundi",              flag:"🇧🇮", capital:"Gitega",               price:0.9,  beer:"Primus",                  type:"Lager" },
+  "116":{ name:"Cambodia",             flag:"🇰🇭", capital:"Phnom Penh",           price:1.0,  beer:"Angkor",                  type:"Lager" },
+  "120":{ name:"Cameroon",             flag:"🇨🇲", capital:"Yaoundé",              price:1.2,  beer:"33 Export",               type:"Lager" },
+  "124":{ name:"Canada",               flag:"🇨🇦", capital:"Ottawa",               price:7.5,  beer:"Molson Canadian",         type:"Lager" },
+  "140":{ name:"Central African Rep.", flag:"🇨🇫", capital:"Bangui",               price:1.0,  beer:"Mocaf",                   type:"Lager" },
+  "148":{ name:"Chad",                 flag:"🇹🇩", capital:"N'Djamena",            price:1.2,  beer:"Gala",                    type:"Lager" },
+  "152":{ name:"Chile",                flag:"🇨🇱", capital:"Santiago",             price:3.0,  beer:"Cristal",                 type:"Lager" },
+  "156":{ name:"China",                flag:"🇨🇳", capital:"Beijing",              price:1.5,  beer:"Snow",                    type:"Lager" },
+  "170":{ name:"Colombia",             flag:"🇨🇴", capital:"Bogotá",               price:2.2,  beer:"Águila",                  type:"Lager" },
+  "180":{ name:"DR Congo",             flag:"🇨🇩", capital:"Kinshasa",             price:1.5,  beer:"Primus",                  type:"Lager" },
+  "178":{ name:"Congo",                flag:"🇨🇬", capital:"Brazzaville",          price:1.4,  beer:"Ngok",                    type:"Lager" },
+  "188":{ name:"Costa Rica",           flag:"🇨🇷", capital:"San José",             price:2.8,  beer:"Imperial",                type:"Lager" },
+  "384":{ name:"Côte d'Ivoire",        flag:"🇨🇮", capital:"Yamoussoukro",         price:1.3,  beer:"Bock 43",                 type:"Lager" },
+  "191":{ name:"Croatia",              flag:"🇭🇷", capital:"Zagreb",               price:3.5,  beer:"Karlovačko",              type:"Lager" },
+  "192":{ name:"Cuba",                 flag:"🇨🇺", capital:"Havana",               price:1.5,  beer:"Cristal",                 type:"Lager" },
+  "196":{ name:"Cyprus",               flag:"🇨🇾", capital:"Nicosia",              price:4.0,  beer:"KEO",                     type:"Lager" },
+  "203":{ name:"Czech Republic",       flag:"🇨🇿", capital:"Prague",               price:2.5,  beer:"Pilsner Urquell",         type:"Pilsner" },
+  "208":{ name:"Denmark",              flag:"🇩🇰", capital:"Copenhagen",           price:8.0,  beer:"Carlsberg",               type:"Lager" },
+  "262":{ name:"Djibouti",             flag:"🇩🇯", capital:"Djibouti City",        price:3.0,  beer:"Djibouti Beer",           type:"Lager" },
+  "214":{ name:"Dominican Republic",   flag:"🇩🇴", capital:"Santo Domingo",        price:2.5,  beer:"Presidente",              type:"Lager" },
+  "218":{ name:"Ecuador",              flag:"🇪🇨", capital:"Quito",                price:2.0,  beer:"Pilsener",                type:"Pilsner" },
+  "818":{ name:"Egypt",                flag:"🇪🇬", capital:"Cairo",                price:2.0,  beer:"Stella (Egyptian)",       type:"Lager" },
+  "222":{ name:"El Salvador",          flag:"🇸🇻", capital:"San Salvador",         price:2.2,  beer:"Pilsener Salvadoreña",    type:"Pilsner" },
+  "232":{ name:"Eritrea",              flag:"🇪🇷", capital:"Asmara",               price:1.0,  beer:"Asmara Beer",             type:"Lager" },
+  "233":{ name:"Estonia",              flag:"🇪🇪", capital:"Tallinn",              price:3.5,  beer:"A. Le Coq",               type:"Lager" },
+  "748":{ name:"Eswatini",             flag:"🇸🇿", capital:"Mbabane",              price:1.5,  beer:"Sibebe",                  type:"Lager" },
+  "231":{ name:"Ethiopia",             flag:"🇪🇹", capital:"Addis Ababa",          price:1.2,  beer:"St. George",              type:"Lager" },
+  "246":{ name:"Finland",              flag:"🇫🇮", capital:"Helsinki",             price:8.0,  beer:"Karhu",                   type:"Lager" },
+  "250":{ name:"France",               flag:"🇫🇷", capital:"Paris",                price:7.0,  beer:"Kronenbourg 1664",        type:"Lager" },
+  "266":{ name:"Gabon",                flag:"🇬🇦", capital:"Libreville",           price:2.0,  beer:"Régab",                   type:"Lager" },
+  "270":{ name:"Gambia",               flag:"🇬🇲", capital:"Banjul",               price:1.5,  beer:"Julbrew",                 type:"Lager" },
+  "268":{ name:"Georgia",              flag:"🇬🇪", capital:"Tbilisi",              price:1.8,  beer:"Natakhtari",              type:"Lager" },
+  "276":{ name:"Germany",              flag:"🇩🇪", capital:"Berlin",               price:5.0,  beer:"Weihenstephaner",         type:"Wheat Beer" },
+  "288":{ name:"Ghana",                flag:"🇬🇭", capital:"Accra",                price:1.5,  beer:"Club Beer",               type:"Lager" },
+  "300":{ name:"Greece",               flag:"🇬🇷", capital:"Athens",               price:5.0,  beer:"Mythos",                  type:"Lager" },
+  "320":{ name:"Guatemala",            flag:"🇬🇹", capital:"Guatemala City",       price:2.2,  beer:"Gallo",                   type:"Lager" },
+  "324":{ name:"Guinea",               flag:"🇬🇳", capital:"Conakry",              price:1.2,  beer:"Skol",                    type:"Lager" },
+  "624":{ name:"Guinea-Bissau",        flag:"🇬🇼", capital:"Bissau",               price:1.0,  beer:"Super Bock",              type:"Lager" },
+  "328":{ name:"Guyana",               flag:"🇬🇾", capital:"Georgetown",           price:1.8,  beer:"Banks Beer",              type:"Lager" },
+  "332":{ name:"Haiti",                flag:"🇭🇹", capital:"Port-au-Prince",       price:2.0,  beer:"Prestige",                type:"Lager" },
+  "340":{ name:"Honduras",             flag:"🇭🇳", capital:"Tegucigalpa",          price:1.8,  beer:"Salva Vida",              type:"Lager" },
+  "348":{ name:"Hungary",              flag:"🇭🇺", capital:"Budapest",             price:2.8,  beer:"Dreher",                  type:"Lager" },
+  "352":{ name:"Iceland",              flag:"🇮🇸", capital:"Reykjavik",            price:12.0, beer:"Gull",                    type:"Lager" },
+  "356":{ name:"India",                flag:"🇮🇳", capital:"New Delhi",            price:2.5,  beer:"Kingfisher",              type:"Lager" },
+  "360":{ name:"Indonesia",            flag:"🇮🇩", capital:"Jakarta",              price:3.5,  beer:"Bintang",                 type:"Lager" },
+  "364":{ name:"Iran",                 flag:"🇮🇷", capital:"Tehran",               price:2.0,  beer:"Delster (non-alc)",       type:"Malt" },
+  "368":{ name:"Iraq",                 flag:"🇮🇶", capital:"Baghdad",              price:2.5,  beer:"Farida",                  type:"Lager" },
+  "372":{ name:"Ireland",              flag:"🇮🇪", capital:"Dublin",               price:7.5,  beer:"Guinness",                type:"Stout" },
+  "376":{ name:"Israel",               flag:"🇮🇱", capital:"Jerusalem",            price:7.0,  beer:"Goldstar",                type:"Lager" },
+  "380":{ name:"Italy",                flag:"🇮🇹", capital:"Rome",                 price:5.5,  beer:"Peroni",                  type:"Lager" },
+  "388":{ name:"Jamaica",              flag:"🇯🇲", capital:"Kingston",             price:3.0,  beer:"Red Stripe",              type:"Lager" },
+  "392":{ name:"Japan",                flag:"🇯🇵", capital:"Tokyo",                price:6.5,  beer:"Asahi Super Dry",         type:"Lager" },
+  "400":{ name:"Jordan",               flag:"🇯🇴", capital:"Amman",                price:4.0,  beer:"Petra",                   type:"Lager" },
+  "398":{ name:"Kazakhstan",           flag:"🇰🇿", capital:"Astana",               price:1.8,  beer:"Derbes",                  type:"Lager" },
+  "404":{ name:"Kenya",                flag:"🇰🇪", capital:"Nairobi",              price:2.0,  beer:"Tusker",                  type:"Lager" },
+  "408":{ name:"North Korea",          flag:"🇰🇵", capital:"Pyongyang",            price:0.8,  beer:"Taedonggang",             type:"Lager" },
+  "410":{ name:"South Korea",          flag:"🇰🇷", capital:"Seoul",                price:4.0,  beer:"Cass",                    type:"Lager" },
+  "417":{ name:"Kyrgyzstan",           flag:"🇰🇬", capital:"Bishkek",              price:1.2,  beer:"Arpa",                    type:"Lager" },
+  "418":{ name:"Laos",                 flag:"🇱🇦", capital:"Vientiane",            price:1.2,  beer:"Beer Lao",                type:"Lager" },
+  "428":{ name:"Latvia",               flag:"🇱🇻", capital:"Riga",                 price:3.0,  beer:"Aldaris",                 type:"Lager" },
+  "422":{ name:"Lebanon",              flag:"🇱🇧", capital:"Beirut",               price:3.5,  beer:"Almaza",                  type:"Lager" },
+  "426":{ name:"Lesotho",              flag:"🇱🇸", capital:"Maseru",               price:1.5,  beer:"Maluti",                  type:"Lager" },
+  "430":{ name:"Liberia",              flag:"🇱🇷", capital:"Monrovia",             price:1.5,  beer:"Club Beer",               type:"Lager" },
+  "440":{ name:"Lithuania",            flag:"🇱🇹", capital:"Vilnius",              price:2.8,  beer:"Švyturys",                type:"Lager" },
+  "442":{ name:"Luxembourg",           flag:"🇱🇺", capital:"Luxembourg City",      price:5.5,  beer:"Diekirch",                type:"Lager" },
+  "450":{ name:"Madagascar",           flag:"🇲🇬", capital:"Antananarivo",         price:1.2,  beer:"THB",                     type:"Lager" },
+  "454":{ name:"Malawi",               flag:"🇲🇼", capital:"Lilongwe",             price:1.0,  beer:"Kuche Kuche",             type:"Lager" },
+  "458":{ name:"Malaysia",             flag:"🇲🇾", capital:"Kuala Lumpur",         price:5.0,  beer:"Tiger",                   type:"Lager" },
+  "466":{ name:"Mali",                 flag:"🇲🇱", capital:"Bamako",               price:1.2,  beer:"Castel Beer",             type:"Lager" },
+  "470":{ name:"Malta",                flag:"🇲🇹", capital:"Valletta",             price:3.5,  beer:"Cisk",                    type:"Lager" },
+  "478":{ name:"Mauritania",           flag:"🇲🇷", capital:"Nouakchott",           price:2.0,  beer:"Flag",                    type:"Lager" },
+  "480":{ name:"Mauritius",            flag:"🇲🇺", capital:"Port Louis",           price:3.0,  beer:"Phoenix",                 type:"Lager" },
+  "484":{ name:"Mexico",               flag:"🇲🇽", capital:"Mexico City",          price:2.5,  beer:"Corona",                  type:"Lager" },
+  "498":{ name:"Moldova",              flag:"🇲🇩", capital:"Chișinău",             price:1.5,  beer:"Chișinău",                type:"Lager" },
+  "496":{ name:"Mongolia",             flag:"🇲🇳", capital:"Ulaanbaatar",          price:1.5,  beer:"Borgio",                  type:"Lager" },
+  "499":{ name:"Montenegro",           flag:"🇲🇪", capital:"Podgorica",            price:2.5,  beer:"Nikšićko",                type:"Lager" },
+  "504":{ name:"Morocco",              flag:"🇲🇦", capital:"Rabat",                price:3.5,  beer:"Flag Spéciale",           type:"Lager" },
+  "508":{ name:"Mozambique",           flag:"🇲🇿", capital:"Maputo",               price:1.2,  beer:"2M",                      type:"Lager" },
+  "104":{ name:"Myanmar",              flag:"🇲🇲", capital:"Naypyidaw",            price:1.5,  beer:"Myanmar Beer",            type:"Lager" },
+  "516":{ name:"Namibia",              flag:"🇳🇦", capital:"Windhoek",             price:2.0,  beer:"Windhoek Lager",          type:"Lager" },
+  "524":{ name:"Nepal",                flag:"🇳🇵", capital:"Kathmandu",            price:2.0,  beer:"Everest Beer",            type:"Lager" },
+  "528":{ name:"Netherlands",          flag:"🇳🇱", capital:"Amsterdam",            price:5.5,  beer:"Heineken",                type:"Lager" },
+  "554":{ name:"New Zealand",          flag:"🇳🇿", capital:"Wellington",           price:9.0,  beer:"Tui",                     type:"Lager" },
+  "558":{ name:"Nicaragua",            flag:"🇳🇮", capital:"Managua",              price:1.8,  beer:"Toña",                    type:"Lager" },
+  "562":{ name:"Niger",                flag:"🇳🇪", capital:"Niamey",               price:1.2,  beer:"Bière Niger",             type:"Lager" },
+  "566":{ name:"Nigeria",              flag:"🇳🇬", capital:"Abuja",                price:1.5,  beer:"Star Lager",              type:"Lager" },
+  "807":{ name:"North Macedonia",      flag:"🇲🇰", capital:"Skopje",               price:2.0,  beer:"Skopsko",                 type:"Lager" },
+  "578":{ name:"Norway",               flag:"🇳🇴", capital:"Oslo",                 price:12.0, beer:"Ringnes",                 type:"Lager" },
+  "512":{ name:"Oman",                 flag:"🇴🇲", capital:"Muscat",               price:8.0,  beer:"Heineken",                type:"Lager" },
+  "586":{ name:"Pakistan",             flag:"🇵🇰", capital:"Islamabad",            price:2.0,  beer:"Murree Beer",             type:"Lager" },
+  "591":{ name:"Panama",               flag:"🇵🇦", capital:"Panama City",          price:2.5,  beer:"Balboa",                  type:"Lager" },
+  "598":{ name:"Papua New Guinea",     flag:"🇵🇬", capital:"Port Moresby",         price:3.5,  beer:"SP Lager",                type:"Lager" },
+  "600":{ name:"Paraguay",             flag:"🇵🇾", capital:"Asunción",             price:1.8,  beer:"Pilsen",                  type:"Pilsner" },
+  "604":{ name:"Peru",                 flag:"🇵🇪", capital:"Lima",                 price:2.5,  beer:"Cristal",                 type:"Lager" },
+  "608":{ name:"Philippines",          flag:"🇵🇭", capital:"Manila",               price:1.5,  beer:"San Miguel",              type:"Pale Lager" },
+  "616":{ name:"Poland",               flag:"🇵🇱", capital:"Warsaw",               price:2.8,  beer:"Żywiec",                  type:"Lager" },
+  "620":{ name:"Portugal",             flag:"🇵🇹", capital:"Lisbon",               price:3.5,  beer:"Super Bock",              type:"Lager" },
+  "634":{ name:"Qatar",                flag:"🇶🇦", capital:"Doha",                 price:14.0, beer:"Heineken",                type:"Lager" },
+  "642":{ name:"Romania",              flag:"🇷🇴", capital:"Bucharest",            price:2.0,  beer:"Ursus",                   type:"Lager" },
+  "643":{ name:"Russia",               flag:"🇷🇺", capital:"Moscow",               price:2.0,  beer:"Baltika",                 type:"Lager" },
+  "646":{ name:"Rwanda",               flag:"🇷🇼", capital:"Kigali",               price:1.2,  beer:"Primus",                  type:"Lager" },
+  "682":{ name:"Saudi Arabia",         flag:"🇸🇦", capital:"Riyadh",               price:10.0, beer:"Barbican (non-alc)",      type:"Malt" },
+  "686":{ name:"Senegal",              flag:"🇸🇳", capital:"Dakar",                price:1.5,  beer:"Gazelle",                 type:"Lager" },
+  "688":{ name:"Serbia",               flag:"🇷🇸", capital:"Belgrade",             price:2.2,  beer:"Jelen",                   type:"Lager" },
+  "694":{ name:"Sierra Leone",         flag:"🇸🇱", capital:"Freetown",             price:1.2,  beer:"Star Beer",               type:"Lager" },
+  "702":{ name:"Singapore",            flag:"🇸🇬", capital:"Singapore",            price:10.0, beer:"Tiger",                   type:"Lager" },
+  "703":{ name:"Slovakia",             flag:"🇸🇰", capital:"Bratislava",           price:2.5,  beer:"Zlatý Bažant",            type:"Lager" },
+  "705":{ name:"Slovenia",             flag:"🇸🇮", capital:"Ljubljana",            price:3.5,  beer:"Laško",                   type:"Lager" },
+  "706":{ name:"Somalia",              flag:"🇸🇴", capital:"Mogadishu",            price:1.0,  beer:"Liido Beer",              type:"Lager" },
+  "710":{ name:"South Africa",         flag:"🇿🇦", capital:"Cape Town",            price:2.5,  beer:"Castle Lager",            type:"Lager" },
+  "728":{ name:"South Sudan",          flag:"🇸🇸", capital:"Juba",                 price:2.0,  beer:"White Bull",              type:"Lager" },
+  "724":{ name:"Spain",                flag:"🇪🇸", capital:"Madrid",               price:3.5,  beer:"Mahou",                   type:"Lager" },
+  "144":{ name:"Sri Lanka",            flag:"🇱🇰", capital:"Colombo",              price:2.5,  beer:"Lion Lager",              type:"Lager" },
+  "736":{ name:"Sudan",                flag:"🇸🇩", capital:"Khartoum",             price:1.5,  beer:"Camel Beer",              type:"Lager" },
+  "740":{ name:"Suriname",             flag:"🇸🇷", capital:"Paramaribo",           price:2.0,  beer:"Parbo",                   type:"Lager" },
+  "752":{ name:"Sweden",               flag:"🇸🇪", capital:"Stockholm",            price:9.5,  beer:"Pripps Blå",              type:"Lager" },
+  "756":{ name:"Switzerland",          flag:"🇨🇭", capital:"Bern",                 price:9.0,  beer:"Feldschlösschen",         type:"Lager" },
+  "760":{ name:"Syria",                flag:"🇸🇾", capital:"Damascus",             price:1.5,  beer:"Al-Shark",                type:"Lager" },
+  "762":{ name:"Tajikistan",           flag:"🇹🇯", capital:"Dushanbe",             price:1.2,  beer:"Sim-Sim",                 type:"Lager" },
+  "834":{ name:"Tanzania",             flag:"🇹🇿", capital:"Dodoma",               price:1.5,  beer:"Kilimanjaro",             type:"Lager" },
+  "764":{ name:"Thailand",             flag:"🇹🇭", capital:"Bangkok",              price:3.0,  beer:"Chang",                   type:"Lager" },
+  "768":{ name:"Togo",                 flag:"🇹🇬", capital:"Lomé",                 price:1.2,  beer:"Awooyo",                  type:"Lager" },
+  "780":{ name:"Trinidad & Tobago",    flag:"🇹🇹", capital:"Port of Spain",        price:2.5,  beer:"Carib",                   type:"Lager" },
+  "788":{ name:"Tunisia",              flag:"🇹🇳", capital:"Tunis",                price:2.5,  beer:"Celtia",                  type:"Lager" },
+  "792":{ name:"Turkey",               flag:"🇹🇷", capital:"Ankara",               price:4.0,  beer:"Efes",                    type:"Lager" },
+  "795":{ name:"Turkmenistan",         flag:"🇹🇲", capital:"Ashgabat",             price:1.5,  beer:"Zip",                     type:"Lager" },
+  "800":{ name:"Uganda",               flag:"🇺🇬", capital:"Kampala",              price:1.5,  beer:"Bell Lager",              type:"Lager" },
+  "804":{ name:"Ukraine",              flag:"🇺🇦", capital:"Kyiv",                 price:1.8,  beer:"Slavutich",               type:"Lager" },
+  "784":{ name:"UAE",                  flag:"🇦🇪", capital:"Abu Dhabi",            price:12.0, beer:"Heineken",                type:"Lager" },
+  "826":{ name:"United Kingdom",       flag:"🇬🇧", capital:"London",               price:7.5,  beer:"Carling",                 type:"Lager" },
+  "840":{ name:"United States",        flag:"🇺🇸", capital:"Washington D.C.",      price:7.0,  beer:"Bud Light",               type:"Light Lager" },
+  "858":{ name:"Uruguay",              flag:"🇺🇾", capital:"Montevideo",           price:2.8,  beer:"Patricia",                type:"Lager" },
+  "860":{ name:"Uzbekistan",           flag:"🇺🇿", capital:"Tashkent",             price:1.2,  beer:"Sarbast",                 type:"Lager" },
+  "862":{ name:"Venezuela",            flag:"🇻🇪", capital:"Caracas",              price:1.5,  beer:"Polar",                   type:"Lager" },
+  "704":{ name:"Vietnam",              flag:"🇻🇳", capital:"Hanoi",                price:1.0,  beer:"Bia Hoi (draught)",       type:"Lager" },
+  "887":{ name:"Yemen",                flag:"🇾🇪", capital:"Sana'a",               price:2.0,  beer:"Mukalla",                 type:"Lager" },
+  "894":{ name:"Zambia",               flag:"🇿🇲", capital:"Lusaka",               price:1.5,  beer:"Mosi Lager",              type:"Lager" },
+  "716":{ name:"Zimbabwe",             flag:"🇿🇼", capital:"Harare",               price:1.8,  beer:"Castle Lager",            type:"Lager" }
+};
+
+function pcolor(p) {
+  if (p == null) return 'var(--c0)';
+  if (p < 2)  return 'var(--c1)';
+  if (p < 4)  return 'var(--c2)';
+  if (p < 6)  return 'var(--c3)';
+  if (p < 8)  return 'var(--c4)';
+  if (p < 10) return 'var(--c5)';
+  return 'var(--c6)';
+}
+function plabel(p) {
+  if (p < 2)  return 'Very cheap';
+  if (p < 4)  return 'Budget-friendly';
+  if (p < 6)  return 'Moderate';
+  if (p < 8)  return 'Above average';
+  if (p < 10) return 'Expensive';
+  return 'Very expensive';
+}
+
+// ── MAP ───────────────────────────────────────────────────────────────────────
+const wrap = document.getElementById('map-wrap');
+const svg  = d3.select('#map');
+const g    = svg.append('g');
+
+let W = wrap.clientWidth, H = wrap.clientHeight;
+
+const proj = d3.geoNaturalEarth1()
+  .scale(W / 6.3)
+  .translate([W / 2, H / 2]);
+
+const path = d3.geoPath().projection(proj);
+
+const zoom = d3.zoom().scaleExtent([1, 10])
+  .on('zoom', e => g.attr('transform', e.transform));
+svg.call(zoom);
+
+document.getElementById('zi').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 1.5);
+document.getElementById('zo').onclick = () => svg.transition().duration(300).call(zoom.scaleBy, 0.67);
+document.getElementById('zr').onclick = () => svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+
+g.append('path').datum({type:'Sphere'}).attr('class','sphere').attr('d', path({type:'Sphere'}));
+g.append('path').datum(d3.geoGraticule()()).attr('class','graticule').attr('d', path);
+
+d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json').then(world => {
+  const features = topojson.feature(world, world.objects.countries).features;
+  const borders  = topojson.mesh(world, world.objects.countries, (a,b) => a !== b);
+
+  g.selectAll('.country')
+    .data(features)
+    .join('path')
+    .attr('class', 'country')
+    .attr('d', path)
+    .attr('fill', d => {
+      const info = DATA[String(d.id).padStart(3,'0')];
+      return info ? pcolor(info.price) : 'var(--c0)';
+    })
+    .on('mouseenter', (e, d) => {
+      const info = DATA[String(d.id).padStart(3,'0')];
+      if (!info) return;
+      document.getElementById('tt-n').textContent = info.flag + ' ' + info.name;
+      document.getElementById('tt-p').textContent = '$' + info.price.toFixed(2) + ' per pint';
+      document.getElementById('tt-b').textContent = info.beer + ' · ' + info.type;
+      tt.classList.add('on');
+      moveTT(e);
+    })
+    .on('mousemove', moveTT)
+    .on('mouseleave', () => tt.classList.remove('on'))
+    .on('click', (e, d) => selectCountry(String(d.id).padStart(3,'0')));
+
+  g.append('path').datum(borders).attr('class','borders').attr('d', path);
+
+  buildList();
+});
+
+// ── TOOLTIP ───────────────────────────────────────────────────────────────────
+const tt = document.getElementById('tt');
+function moveTT(e) {
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + 215 > innerWidth)  x = e.clientX - 215 - 14;
+  if (y + 80  > innerHeight) y = e.clientY - 80  - 14;
+  tt.style.left = x + 'px'; tt.style.top = y + 'px';
+}
+
+// ── DETAIL PANEL ──────────────────────────────────────────────────────────────
+function selectCountry(id) {
+  const info = DATA[id];
+  document.getElementById('hint').style.display = info ? 'none' : 'block';
+  const detail = document.getElementById('detail');
+  if (!info) { detail.classList.remove('show'); return; }
+  detail.classList.remove('show');
+  void detail.offsetWidth;
+  detail.classList.add('show');
+  document.getElementById('d-flag').textContent = info.flag;
+  document.getElementById('d-name').textContent = info.name;
+  document.getElementById('d-cap').textContent  = '📍 ' + info.capital;
+  document.getElementById('d-price').innerHTML  = '$' + info.price.toFixed(2) + ' <small>USD</small>';
+  document.getElementById('d-bar').style.width  = Math.min(100,(info.price/15)*100) + '%';
+  document.getElementById('d-note').textContent = plabel(info.price);
+  document.getElementById('d-beer').textContent = info.beer;
+  document.getElementById('d-type').textContent = info.type;
+  g.selectAll('.country').classed('active', d => String(d.id).padStart(3,'0') === id);
+  document.querySelectorAll('.li').forEach(el => el.classList.toggle('active', el.dataset.id === id));
+  document.querySelector(`.li[data-id="${id}"]`)?.scrollIntoView({block:'nearest'});
+}
+
+// ── LIST ──────────────────────────────────────────────────────────────────────
+function buildList(filter = '') {
+  const lc = filter.toLowerCase();
+  const items = Object.entries(DATA)
+    .filter(([,v]) => !filter || v.name.toLowerCase().includes(lc) || v.beer.toLowerCase().includes(lc))
+    .sort((a,b) => b[1].price - a[1].price);
+  const body = document.getElementById('list-body');
+  body.innerHTML = '';
+  items.forEach(([id, v], i) => {
+    const d = document.createElement('div');
+    d.className = 'li'; d.dataset.id = id;
+    d.innerHTML = `<div class="li-rank">${i+1}</div><div class="li-flag">${v.flag}</div><div class="li-info"><div class="li-country">${v.name}</div><div class="li-beer">${v.beer}</div></div><div class="li-price" style="color:${pcolor(v.price)}">$${v.price.toFixed(2)}</div>`;
+    d.addEventListener('click', () => selectCountry(id));
+    body.appendChild(d);
+  });
+}
+document.getElementById('search').addEventListener('input', e => buildList(e.target.value));
+
+// ── RESIZE ────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  W = wrap.clientWidth; H = wrap.clientHeight;
+  proj.scale(W/6.3).translate([W/2,H/2]);
+  g.selectAll('path').attr('d', path);
+  g.select('.sphere').attr('d', path({type:'Sphere'}));
+});
+</script>
+</body>
+</html>
